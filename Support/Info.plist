@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Calendar Sync</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.example.calendarsync</string>
+	<string>org.neteinstein.calendarsync</string>
 	<key>CFBundleExecutable</key>
 	<string>CalendarSync</string>
 	<key>CFBundlePackageType</key>
