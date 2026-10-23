@@ -39,7 +39,7 @@ final class EventKitBridge {
         }
         // EventKit expands recurring meetings into one EKEvent per occurrence.
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [calendar])
-        return .success(store.events(matching: predicate).map(Self.sourceEvent))
+        return .success(store.events(matching: predicate).map { Self.sourceEvent($0) })
     }
 
     static func sourceEvent(_ event: EKEvent) -> SourceEvent {
@@ -73,6 +73,11 @@ final class EventKitBridge {
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [calendar])
         return store.events(matching: predicate).compactMap { event in
             guard let marker = CopyMarker.find(in: event.notes), let eventID = event.eventIdentifier else { return nil }
+            // Exchange and Google may drop the event URL and change line endings. Read it the
+            // way we wrote it, so unchanged copies aren't rewritten on every sync.
+            let notes = (event.notes ?? "")
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             return ExistingCopy(
                 eventID: eventID,
                 marker: marker,
@@ -80,8 +85,8 @@ final class EventKitBridge {
                 start: event.startDate,
                 end: event.endDate,
                 isAllDay: event.isAllDay,
-                url: event.url,
-                notes: event.notes ?? ""
+                url: event.url ?? MeetingLink.firstMeetingLink(in: notes),
+                notes: notes
             )
         }
     }

@@ -75,6 +75,11 @@ final class SyncController: ObservableObject {
     /// (used for the preview).
     @discardableResult
     func sync(apply: Bool = true, includeWebSources: Bool = true) async -> SyncPlan? {
+        // Access may have been granted in System Settings since launch; start() then syncs.
+        if !hasCalendarAccess, eventKit.hasAccess {
+            await start()
+            return nil
+        }
         guard hasCalendarAccess, !isSyncing else { return nil }
         guard let targetID = settings.targetCalendarID, eventKit.calendar(id: targetID) != nil else {
             lastSummary = "Choose a Mindera calendar to copy into in Settings."
@@ -138,7 +143,16 @@ final class SyncController: ObservableObject {
     }
 
     func forgetOutlookSession(for sourceID: UUID) {
+        outlookSources[sourceID]?.tearDown()
         outlookSources[sourceID] = nil
-        Task { try? await WKWebsiteDataStore.remove(forIdentifier: sourceID) }
+        Task {
+            // Give WebKit a moment to release the store; it can't be removed while in use.
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            do {
+                try await WKWebsiteDataStore.remove(forIdentifier: sourceID)
+            } catch {
+                NSLog("Calendar Sync: couldn't delete Outlook sign-in data: \(error)")
+            }
+        }
     }
 }

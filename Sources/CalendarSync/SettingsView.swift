@@ -31,6 +31,7 @@ private struct GeneralTab: View {
                         CalendarLabel(calendar: calendar).tag(Optional(calendar.calendarIdentifier))
                     }
                 }
+                .onChange(of: settings.targetCalendarID) { _, _ in Task { await controller.sync() } }
                 Text("Usually your Mindera calendar. It must be added to Calendar.app.")
                     .font(.caption).foregroundStyle(.secondary)
             }
