@@ -197,13 +197,13 @@ final class OutlookWebSource: NSObject, ObservableObject {
 }
 
 /// Avoids the retain cycle WKUserContentController creates with its message handlers.
-@MainActor
 private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     weak var target: OutlookWebSource?
 
     init(_ target: OutlookWebSource) { self.target = target }
 
+    // WebKit delivers script messages on the main thread.
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        target?.receive(message)
+        MainActor.assumeIsolated { target?.receive(message) }
     }
 }

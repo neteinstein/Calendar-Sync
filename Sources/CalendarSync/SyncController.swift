@@ -45,8 +45,12 @@ final class SyncController: ObservableObject {
     func restartTimer() {
         timer?.invalidate()
         let interval = TimeInterval(max(settings.intervalMinutes, 1) * 60)
+        // Scheduled on the main run loop, so the block runs on the main actor.
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.sync() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Task { await self.sync() }
+            }
         }
     }
 
