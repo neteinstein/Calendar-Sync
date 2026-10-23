@@ -4,9 +4,9 @@
 
 # Calendar Sync
 
-**Your client meetings, in your Mindera calendar.**
+**Your client meetings, in your main calendar.**
 
-A tiny macOS menu bar app that copies meetings from your client calendars into your company calendar, so colleagues stop booking you over your client standup.
+A tiny macOS menu bar app that copies meetings from your client calendars into your main calendar, so colleagues stop booking you over your client standup.
 
 [![Build](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111?logo=apple&logoColor=white)
@@ -14,7 +14,7 @@ A tiny macOS menu bar app that copies meetings from your client calendars into y
 ![Menu bar app](https://img.shields.io/badge/lives%20in-the%20menu%20bar-14B8A6)
 
 <a href="https://github.com/neteinstein/Calendar-Sync/raw/main/docs/calendar-sync.mp4">
-  <img src="docs/demo.webp" width="860" alt="Calendar Sync demo: client meetings are copied into the Mindera calendar as [Calendar A] meeting name, with the Teams link">
+  <img src="docs/demo.webp" width="860" alt="Calendar Sync demo: client meetings are copied into the main calendar as [Calendar A] meeting name, with the Teams link">
 </a>
 
 <sub>▶ <a href="https://github.com/neteinstein/Calendar-Sync/raw/main/docs/calendar-sync.mp4">Watch with sound</a> · 21 seconds</sub>
@@ -25,9 +25,9 @@ A tiny macOS menu bar app that copies meetings from your client calendars into y
 
 ## Why
 
-Booked solid at the client. Wide open at Mindera.
+Booked solid at the client. Wide open in your main calendar.
 
-When you work inside a client's calendar, your own company calendar says you're free all day. The old fix was a [hand-built Shortcut and a cron job](#coming-from-the-shortcut). Calendar Sync does the same job properly: one install, a settings window, and copies that stay correct when meetings move.
+When you work inside a client's calendar, your main calendar (the one your colleagues book you through) says you're free all day. The old fix was a [hand-built Shortcut and a cron job](#coming-from-the-shortcut). Calendar Sync does the same job properly: one install, a settings window, and copies that stay correct when meetings move.
 
 ## What you get
 
@@ -42,7 +42,7 @@ Each copy is titled **`[Calendar name] Meeting name`**, e.g. `[Calendar A] Sprin
 <td width="50%" valign="top">
 
 ### 🔗 Meeting link included
-Teams, Zoom, Google Meet and Webex links are copied onto the event and shown first in its notes, so **Join** works straight from your Mindera calendar.
+Teams, Zoom, Google Meet and Webex links are copied onto the event and shown first in its notes, so **Join** works straight from your main calendar.
 
 </td>
 </tr>
@@ -85,7 +85,7 @@ flowchart LR
     A["Client calendar<br/>in Calendar.app"] --> S
     B[".ics calendar link<br/>(subscribed)"] --> S
     C["Outlook on the web<br/>(sign in once)"] --> S
-    S{{"Calendar Sync<br/>plan: add · update · remove"}} --> M["Mindera calendar<br/>[Calendar A] Sprint planning ▶ Join"]
+    S{{"Calendar Sync<br/>plan: add · update · remove"}} --> M["Main calendar<br/>[Calendar A] Sprint planning ▶ Join"]
 ```
 
 Every copy ends its notes with a tag like `calsync:v1:<source id>:<occurrence id>`. The app uses it to recognise its own copies and match them to their originals, which is why a moved meeting gets updated instead of duplicated.
@@ -123,7 +123,7 @@ open "build/Calendar Sync.app"
 
 Allow calendar access on first launch. Then open **Settings…** from the menu bar icon:
 
-1. **General:** choose the calendar to copy into (your Mindera calendar), how many days ahead, and how often to sync.
+1. **General:** choose your **main calendar** (the one meetings are copied into), how many days ahead, and how often to sync.
 2. **Client calendars:** add each client calendar. For Outlook on the web, also give it a calendar name.
 3. **Preview:** see what a sync would change, then let it run.
 

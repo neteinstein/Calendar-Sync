@@ -86,7 +86,7 @@ final class SyncController: ObservableObject {
         }
         guard hasCalendarAccess, !isSyncing else { return nil }
         guard let targetID = settings.targetCalendarID, eventKit.calendar(id: targetID) != nil else {
-            lastSummary = "Choose a Mindera calendar to copy into in Settings."
+            lastSummary = "Choose your main calendar to copy into in Settings."
             return nil
         }
         isSyncing = true
