@@ -8,7 +8,7 @@
 
 A tiny macOS menu bar app that copies meetings from your client calendars into your main calendar, so colleagues stop booking you over your client standup.
 
-[![Version 1.1.12](https://img.shields.io/badge/version-1.1.12-2563EB)](Support/Info.plist)
+[![Version 1.1.13](https://img.shields.io/badge/version-1.1.13-2563EB)](Support/Info.plist)
 [![Build](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111?logo=apple&logoColor=white)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white)
@@ -141,7 +141,7 @@ The Busy events that two way sync adds to client calendars carry no tag. The app
 |---|---|
 | **Added to Calendar.app** (Exchange, Google, iCloud, …) | **Add client calendar › From Calendar.app** |
 | **Browser only, with a published link** | **Add client calendar › Calendar link (.ics)**. Calendar.app subscribes to the link, then you pick it like any other calendar. |
-| **Browser only: Outlook / Microsoft 365** | **Add client calendar › Outlook on the web**. Sign in once in the app's own window (MFA included, but not with a security key). Each sync reloads Outlook's week view in the background, reads the meetings it loads, then loads each meeting in full for its join link and details. *Experimental.* |
+| **Browser only: Outlook / Microsoft 365** | **Add client calendar › Outlook on the web**. Sign in once in the app's own window (MFA included, also with a USB security key). Each sync reloads Outlook's week view in the background, reads the meetings it loads, then loads each meeting in full for its join link and details. *Experimental.* |
 
 <details>
 <summary><b>About the Outlook on the web option</b></summary>
@@ -150,7 +150,7 @@ The Busy events that two way sync adds to client calendars carry no tag. The app
 
 - It reads the same data your browser shows you. Nothing is sent anywhere except into your own calendar.
 - To Outlook it is one more Safari signed in to the account: the app's window runs the WebKit of the Safari installed on your Mac and reports its user agent, with its own cookie store. Microsoft's sign-in logs show it as Safari on macOS, and the same sign-in policies apply as to a browser.
-- **Security keys (YubiKey, passkeys) can't be used in the window**: macOS only lets full browsers use them. Microsoft's sign-in pages are told it's a plain web view, so they offer the other methods (Microsoft Authenticator, a code, a password) instead of sending you round in circles with the key. An account that can only sign in with a security key can't be added this way.
+- **USB security keys (YubiKey and other FIDO2 keys) work in the window**: macOS only lets full browsers use them, so the app talks to the key itself, the way browsers do. When Microsoft asks for the key, the app asks for the key's PIN, then you touch the key. Only signing in works: register a new key in a browser. Passkeys on the Mac or a phone, and NFC keys, can't be used in the window. A company sign-in page that isn't Microsoft's (Okta, ADFS, …) doesn't offer the key in the window, so use another method there.
 - It depends on how Outlook's web app works internally, which Microsoft can change without notice. If a sync can't find calendar data, or you've been signed out, the existing copies are **left as they are**. The menu bar icon then shows a warning and an **Open Outlook** button.
 - Reading a client's calendar this way may go against the client's IT or security policy. **Check with the client first**, and consider turning on **Hide meeting names** for that calendar.
 - Each Outlook calendar keeps its own sign-in, so you can add more than one.

@@ -15,13 +15,13 @@ import WebKit
 ///
 /// To Outlook this is a Safari session: the web view runs the WebKit of the Safari installed
 /// on this Mac and reports its user agent, with its own cookie store, so it is one more
-/// browser signed in to the account. Microsoft's sign-in pages see a plain web view instead,
-/// so they don't offer a security key, which the web view can't use (see `webViewUserAgent`).
+/// browser signed in to the account. WebKit doesn't let the web view use a security key
+/// itself, so Microsoft's sign-in pages get one from `SecurityKeySignIn` (see `webAuthnScript`).
 ///
 /// EXPERIMENTAL: this depends on how Outlook on the web loads its data, which Microsoft can
 /// change at any time. If a sync can't find calendar data, the copies are left untouched.
 @MainActor
-final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
+final class OutlookWebSource: NSObject, ObservableObject {
     /// Change if the client uses a different Outlook host (e.g. outlook.office365.com).
     static let host = "https://outlook.office.com"
 
@@ -34,7 +34,7 @@ final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
     /// On a clock that setting the time doesn't move, like the waits that use it.
     private var lastCaptureAt: ContinuousClock.Instant?
     private var isFetching = false
-    private let safariUserAgent: String
+    private let securityKey = SecurityKeySignIn()
 
     init(sourceID: UUID) {
         self.sourceID = sourceID
@@ -46,14 +46,16 @@ final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
         config.userContentController.addUserScript(
             WKUserScript(source: Self.captureScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         config.userContentController.addUserScript(
+            WKUserScript(source: Self.webAuthnScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        config.userContentController.addUserScript(
             WKUserScript(source: Self.hideWebAuthnScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 860), configuration: config)
-        safariUserAgent = Self.safariUserAgent()
-        webView.customUserAgent = safariUserAgent
+        webView.customUserAgent = Self.safariUserAgent()
         super.init()
         webView.configuration.userContentController.add(WeakMessageHandler(self), name: "calsync")
-        webView.navigationDelegate = self
+        webView.configuration.userContentController.addScriptMessageHandler(
+            WeakReplyHandler(self), contentWorld: .page, name: "calsyncSecurityKey")
     }
 
     /// The user agent of the Safari installed on this Mac, whose WebKit is the one the web view
@@ -63,19 +65,13 @@ final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
     static func safariUserAgent() -> String {
         let version = Bundle(path: "/Applications/Safari.app")?
             .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        return "\(webViewUserAgent) Version/\(version ?? "26.0") Safari/605.1.15"
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            + "Version/\(version ?? "26.0") Safari/605.1.15"
     }
-
-    /// WKWebView's own user agent, which names no browser: what the sign-in pages get.
-    /// Microsoft's sign-in offers a security key (FIDO2, e.g. a YubiKey) to anything that calls
-    /// itself a browser, and WebKit only lets browsers Apple has approved use one, so in this
-    /// window the key fails every time and the sign-in goes round in circles. Seen as a plain
-    /// web view, the sign-in offers the other methods instead.
-    static let webViewUserAgent =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
 
     /// Releases the web view so its stored sign-in can be deleted.
     func tearDown() {
+        securityKey.cancel()
         window?.close()
         window = nil
         webView.stopLoading()
@@ -300,36 +296,11 @@ final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
     }
 
     /// Microsoft's sign-in hosts: work and personal accounts, and the security key page.
+    static let signInHosts = ["login.microsoftonline.com", "login.microsoft.com", "login.live.com"]
+
     static func isSignInHost(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
-        return ["login.microsoftonline.com", "login.microsoft.com", "login.live.com"]
-            .contains { host == $0 || host.hasSuffix("." + $0) }
-    }
-
-    // MARK: - Navigation
-
-    /// Gives the sign-in pages WebKit's own user agent and everything else Safari's (see
-    /// `webViewUserAgent`), switching on the way in and out. A navigation already under way,
-    /// like a redirect, keeps the headers it started with, so one that needs the other user
-    /// agent is started over. Not a form post: started over it would lose its body, and it
-    /// takes the new user agent up anyway. Only the window's own page: Outlook renews its
-    /// sign-in in frames that aren't shown, and those stay as Outlook made them.
-    func webView(
-        _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
-    ) {
-        guard action.targetFrame?.isMainFrame == true, let url = action.request.url else {
-            return decisionHandler(.allow)
-        }
-        let agent = Self.isSignInHost(url) ? Self.webViewUserAgent : safariUserAgent
-        guard webView.customUserAgent != agent else { return decisionHandler(.allow) }
-        webView.customUserAgent = agent
-        if action.request.httpMethod?.uppercased() == "POST" {
-            decisionHandler(.allow)
-        } else {
-            decisionHandler(.cancel)
-            webView.load(action.request)
-        }
+        return signInHosts.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
     fileprivate func receive(_ message: WKScriptMessage) {
@@ -339,6 +310,10 @@ final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
         guard isFetching, let text = message.body as? String else { return }
         captured.append(Data(text.utf8))
         lastCaptureAt = .now
+    }
+
+    fileprivate func receiveSecurityKey(_ message: WKScriptMessage, reply: @escaping (Any?, String?) -> Void) {
+        Task { reply(await securityKey.handle(message, window: window), nil) }
     }
 
     // MARK: - URLs
@@ -517,14 +492,131 @@ final class OutlookWebSource: NSObject, ObservableObject, WKNavigationDelegate {
     return api ? await api.loadItems(ids) : [];
     """#
 
-    /// Takes the WebAuthn API out of every page. The web view has it but can't use it (see
-    /// `webViewUserAgent`), and a sign-in page that looks for it before offering a security key
-    /// or passkey then offers its other methods instead. Microsoft's goes by the user agent.
+    /// Gives Microsoft's sign-in pages a `navigator.credentials.get` that works: WebKit's own
+    /// fails at once in the web view, which isn't a browser Apple has approved. Requests for a
+    /// security key go to `SecurityKeySignIn`, which signs with a USB key itself; the answer is
+    /// handed to the page the way a browser would hand it. Other pages keep WebKit's.
+    static let webAuthnScript = #"""
+    (function () {
+      const hosts = \#(signInHostsJSON);
+      const host = location.hostname.toLowerCase();
+      if (location.protocol !== 'https:' || !hosts.some(h => host === h || host.endsWith('.' + h))) return;
+      const container = navigator.credentials;
+      const handler = window.webkit && window.webkit.messageHandlers.calsyncSecurityKey;
+      if (!container || !handler) return;
+      const nativeGet = container.get;
+
+      function bytes(source) {
+        if (source instanceof ArrayBuffer) return new Uint8Array(source);
+        if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+        throw new TypeError('Expected an ArrayBuffer or a view of one');
+      }
+      function encode(source) {
+        let text = '';
+        for (const b of bytes(source)) text += String.fromCharCode(b);
+        return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+      function decode(text) {
+        const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+        const out = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+        return out.buffer;
+      }
+      function abortError(signal) {
+        return signal.reason !== undefined ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
+      }
+      function credential(reply) {
+        const json = {
+          id: reply.id, rawId: reply.id, type: 'public-key', authenticatorAttachment: 'cross-platform',
+          response: {
+            clientDataJSON: reply.clientDataJSON, authenticatorData: reply.authenticatorData,
+            signature: reply.signature, userHandle: reply.userHandle || null,
+          },
+          clientExtensionResults: {},
+        };
+        return {
+          id: reply.id, rawId: decode(reply.id), type: 'public-key', authenticatorAttachment: 'cross-platform',
+          response: {
+            clientDataJSON: decode(reply.clientDataJSON), authenticatorData: decode(reply.authenticatorData),
+            signature: decode(reply.signature), userHandle: reply.userHandle ? decode(reply.userHandle) : null,
+          },
+          getClientExtensionResults() { return {}; },
+          toJSON() { return json; },
+        };
+      }
+
+      function get(options) {
+        if (!options || !options.publicKey) return nativeGet.apply(container, arguments);
+        const signal = options.signal;
+        if (signal && signal.aborted) return Promise.reject(abortError(signal));
+        // Autofill, which a security key can't answer: wait, like a browser with no passkey to
+        // offer, until the page gives up on it.
+        if (options.mediation === 'conditional') {
+          return new Promise((resolve, reject) => {
+            if (signal) signal.addEventListener('abort', () => reject(abortError(signal)), { once: true });
+          });
+        }
+        let request;
+        try {
+          const publicKey = options.publicKey;
+          request = {
+            challenge: encode(publicKey.challenge),
+            rpId: publicKey.rpId ? String(publicKey.rpId) : null,
+            allowCredentials: (publicKey.allowCredentials || []).map(c => encode(c.id)),
+            userVerification: publicKey.userVerification || 'preferred',
+            timeout: typeof publicKey.timeout === 'number' ? publicKey.timeout : null,
+          };
+        } catch (e) {
+          return Promise.reject(e);
+        }
+        return new Promise((resolve, reject) => {
+          function onAbort() {
+            handler.postMessage({ action: 'cancel' }).catch(() => {});
+            reject(abortError(signal));
+          }
+          // Once answered, an abort (the page tidying up later) must not cancel a newer request.
+          function done() {
+            if (signal) signal.removeEventListener('abort', onAbort);
+          }
+          if (signal) signal.addEventListener('abort', onAbort, { once: true });
+          handler.postMessage({ action: 'get', request }).then(reply => {
+            done();
+            if (reply && reply.error) reject(new DOMException(reply.message || '', reply.error));
+            else resolve(credential(reply));
+          }, e => {
+            done();
+            reject(new DOMException(String((e && e.message) || e), 'NotAllowedError'));
+          });
+        });
+      }
+      Object.defineProperty(container, 'get', { value: get, configurable: true, writable: true });
+
+      // No passkey on this Mac to offer, as far as the page is concerned.
+      const PKC = window.PublicKeyCredential;
+      for (const name of ['isUserVerifyingPlatformAuthenticatorAvailable', 'isConditionalMediationAvailable']) {
+        try {
+          if (PKC) Object.defineProperty(PKC, name, { value: () => Promise.resolve(false), configurable: true, writable: true });
+        } catch (e) {}
+      }
+    })();
+    """#
+
+    /// Takes the WebAuthn API out of every other page and frame. There the web view has it but
+    /// can't use it, and a sign-in page that looks for it before offering a security key or
+    /// passkey (a federated one, like Okta or ADFS) then offers its other methods instead.
     static let hideWebAuthnScript = #"""
     (function () {
+      const hosts = \#(signInHostsJSON);
+      const host = location.hostname.toLowerCase();
+      const signIn = location.protocol === 'https:' && hosts.some(h => host === h || host.endsWith('.' + h));
+      if (signIn && window.top === window) return;
       try { delete window.PublicKeyCredential; } catch (e) {}
     })();
     """#
+
+    private static var signInHostsJSON: String {
+        "[" + signInHosts.map { "'\($0)'" }.joined(separator: ", ") + "]"
+    }
 }
 
 /// Avoids the retain cycle WKUserContentController creates with its message handlers.
@@ -536,5 +628,22 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     // WebKit delivers script messages on the main thread.
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         MainActor.assumeIsolated { target?.receive(message) }
+    }
+}
+
+/// `WeakMessageHandler` for messages the page waits for an answer to.
+private final class WeakReplyHandler: NSObject, WKScriptMessageHandlerWithReply {
+    weak var target: OutlookWebSource?
+
+    init(_ target: OutlookWebSource) { self.target = target }
+
+    func userContentController(
+        _ controller: WKUserContentController, didReceive message: WKScriptMessage,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        MainActor.assumeIsolated {
+            guard let target else { return replyHandler(nil, "The Outlook window is closed.") }
+            target.receiveSecurityKey(message, reply: replyHandler)
+        }
     }
 }
