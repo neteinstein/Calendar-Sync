@@ -46,6 +46,9 @@ final class OutlookWebSource: NSObject, ObservableObject {
         config.userContentController.addUserScript(
             WKUserScript(source: Self.captureScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         config.userContentController.addUserScript(
+            WKUserScript(source: Self.bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: false,
+                         in: Self.bridgeWorld))
+        config.userContentController.addUserScript(
             WKUserScript(source: Self.webAuthnScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.addUserScript(
             WKUserScript(source: Self.hideWebAuthnScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
@@ -53,7 +56,8 @@ final class OutlookWebSource: NSObject, ObservableObject {
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 860), configuration: config)
         webView.customUserAgent = Self.safariUserAgent()
         super.init()
-        webView.configuration.userContentController.add(WeakMessageHandler(self), name: "calsync")
+        webView.configuration.userContentController.add(
+            WeakMessageHandler(self), contentWorld: Self.bridgeWorld, name: "calsync")
         webView.configuration.userContentController.addScriptMessageHandler(
             WeakReplyHandler(self), contentWorld: .page, name: "calsyncSecurityKey")
     }
@@ -68,6 +72,12 @@ final class OutlookWebSource: NSObject, ObservableObject {
         return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
             + "Version/\(version ?? "26.0") Safari/605.1.15"
     }
+
+    /// Where the app's own scripts run: the same pages, with their own JavaScript globals. The
+    /// page can't see what they define there, the `calsync` message handler included, nor
+    /// change the functions they call. Only `captureScript` runs in the page's world, as it has
+    /// to in order to see the page's requests.
+    private static var bridgeWorld: WKContentWorld { .world(name: "CalendarSync") }
 
     /// Releases the web view so its stored sign-in can be deleted.
     func tearDown() {
@@ -196,7 +206,7 @@ final class OutlookWebSource: NSObject, ObservableObject {
     private func loadDetails(itemIDs: [String]) async -> [Data] {
         guard !itemIDs.isEmpty else { return [] }
         return await withCheckedContinuation { continuation in
-            webView.callAsyncJavaScript(Self.detailsScript, arguments: ["ids": itemIDs], in: nil, in: .page) { result in
+            webView.callAsyncJavaScript(Self.detailsScript, arguments: ["ids": itemIDs], in: nil, in: Self.bridgeWorld) { result in
                 let texts = (try? result.get()) as? [String] ?? []
                 continuation.resume(returning: texts.map { Data($0.utf8) })
             }
@@ -208,7 +218,7 @@ final class OutlookWebSource: NSObject, ObservableObject {
     private func meetingsOnScreen(from: Date, to: Date) async -> [SourceEvent] {
         let script = "[...document.querySelectorAll('[aria-label]')].map(e => e.getAttribute('aria-label'))"
         for _ in 0..<10 {
-            let labels = (try? await webView.evaluateJavaScript(script) as? [String]) ?? []
+            let labels = (try? await webView.evaluateJavaScript(script, contentWorld: Self.bridgeWorld) as? [String]) ?? []
             let events = OutlookWebParser.events(fromScreenLabels: labels)
                 .filter { $0.start >= from && $0.start < to }
             if !events.isEmpty { return events }
@@ -251,7 +261,7 @@ final class OutlookWebSource: NSObject, ObservableObject {
         })()
         """
         for _ in 0..<5 {
-            if (try? await webView.evaluateJavaScript(script) as? Bool) == true { return true }
+            if (try? await webView.evaluateJavaScript(script, contentWorld: Self.bridgeWorld) as? Bool) == true { return true }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
         return false
@@ -280,7 +290,7 @@ final class OutlookWebSource: NSObject, ObservableObject {
         var clicked = false
         for _ in 0..<30 {
             if isSignInPage(webView.url) { return .failed }
-            switch (try? await webView.evaluateJavaScript(script) as? String) ?? "loading" {
+            switch (try? await webView.evaluateJavaScript(script, contentWorld: Self.bridgeWorld) as? String) ?? "loading" {
             case "week": return clicked ? .switched : .alreadyWeek
             case "clicked": clicked = true
             case "no-week-button": return .failed
@@ -335,37 +345,57 @@ final class OutlookWebSource: NSObject, ObservableObject {
         return weeks
     }
 
-    /// Wraps `fetch` and `XMLHttpRequest` in the page and forwards responses from calendar
-    /// endpoints to the app. Also remembers the URL and headers of Outlook's own service calls
-    /// (which carry its sign-in) for `loadItems`, which `detailsScript` calls. Read-only:
-    /// requests are passed through unchanged.
+    /// Wraps `fetch` and `XMLHttpRequest` in the page and hands responses from calendar
+    /// endpoints, and the URL and headers of Outlook's own service calls (which carry its
+    /// sign-in), to `bridgeScript`. Read-only: requests are passed through unchanged.
     ///
-    /// Everything stays inside the script; the page only gets `window.__calsync.loadItems`.
-    /// In particular the remembered sign-in headers are not left on `window`, where any
-    /// script in the page could read them.
+    /// This is the one script in the page's own world, and it leaves nothing there for the page
+    /// to find. The wrappers are proxies of the functions they wrap, so they keep their names
+    /// and lengths, and `toString` gives the native source for them (and for itself). What they
+    /// see goes through a detached element only the two scripts hold (see `bridgeScript`),
+    /// using DOM functions taken before any of the page's scripts ran.
     static let captureScript = #"""
     (function () {
-      if (window.__calsync) return;
       // graphql carries the weeks after the first one. SaveCalendarView only stores which
       // view is shown and has no events.
       const RX = /^(?!.*savecalendarview).*(calendarview|finditem|calendaritem|startupdata|\/events|graphql)/i;
       const MAX = 8 * 1024 * 1024;
-      const nativeFetch = window.fetch;
-      // Outlook's last service call: { url, headers }.
-      let service = null;
+      const apply = Reflect.apply, stringify = JSON.stringify, NativeEvent = Event;
+      const call = Function.prototype.call;
+      const setAttribute = call.bind(Element.prototype.setAttribute);
+      const removeAttribute = call.bind(Element.prototype.removeAttribute);
+      const dispatch = call.bind(EventTarget.prototype.dispatchEvent);
+      const native = call.bind(WeakMap.prototype.get);
 
+      // The bridge's end: offered while both scripts start, before the page has any listener.
+      let port = null;
+      function take(event) {
+        if (port || !event.relatedTarget) return;
+        port = event.relatedTarget;
+        port.setAttribute('connected', '');
+        document.removeEventListener('calsync-port', take);
+      }
+      document.addEventListener('calsync-port', take);
+      document.dispatchEvent(new Event('calsync-hello'));
+
+      function post(type, text) {
+        if (!port) return;
+        setAttribute(port, 'data', text);
+        dispatch(port, new NativeEvent(type));
+        removeAttribute(port, 'data');
+      }
       function send(text) {
         try {
           if (!text || text.length > MAX) return;
           const c = text.trimStart()[0];
           if (c !== '{' && c !== '[') return;
-          window.webkit.messageHandlers.calsync.postMessage(text);
+          post('calsync-response', text);
         } catch (e) {}
       }
       function remember(url, headers) {
         try {
           if (!/\/service\.svc/i.test(String(url))) return;
-          service = { url: new URL(String(url), location.href).href, headers: headers };
+          post('calsync-service', stringify({ url: new URL(String(url), location.href).href, headers: headers }));
         } catch (e) {}
       }
       function headersOf(source, into) {
@@ -373,52 +403,93 @@ final class OutlookWebSource: NSObject, ObservableObject {
         return into;
       }
 
-      if (nativeFetch) {
-        window.fetch = function (input, init) {
-          const p = nativeFetch.apply(this, arguments);
+      // Wrapper -> the function it wraps, whose source `toString` gives for it.
+      const wrapped = new WeakMap();
+      function wrap(target, trap) {
+        const wrapper = new Proxy(target, { apply: trap });
+        wrapped.set(wrapper, target);
+        return wrapper;
+      }
+      Function.prototype.toString = wrap(Function.prototype.toString,
+        (toString, self, args) => apply(toString, native(wrapped, self) || self, args));
+
+      if (window.fetch) {
+        window.fetch = wrap(window.fetch, (fetch, self, args) => {
+          const p = apply(fetch, self, args);
           try {
+            const input = args[0], init = args[1];
             const url = typeof input === 'string' ? input : (input && input.url) || '';
             if (RX.test(url)) p.then(r => r.clone().text()).then(send).catch(() => {});
             const headers = headersOf(input && input.headers, {});
             remember(url, headersOf(init && init.headers, headers));
           } catch (e) {}
           return p;
-        };
+        });
       }
 
       // Per request: { url, headers }, until it is sent.
       const requests = new WeakMap();
       const proto = XMLHttpRequest.prototype;
-      const open = proto.open, setHeader = proto.setRequestHeader, xsend = proto.send;
-      proto.open = function (method, url) {
-        try { requests.set(this, { url: String(url), headers: {} }); } catch (e) {}
-        return open.apply(this, arguments);
-      };
-      proto.setRequestHeader = function (name, value) {
+      proto.open = wrap(proto.open, (open, self, args) => {
+        try { requests.set(self, { url: String(args[1]), headers: {} }); } catch (e) {}
+        return apply(open, self, args);
+      });
+      proto.setRequestHeader = wrap(proto.setRequestHeader, (setHeader, self, args) => {
         try {
-          const request = requests.get(this);
-          if (request) request.headers[String(name).toLowerCase()] = String(value);
+          const request = requests.get(self);
+          if (request) request.headers[String(args[0]).toLowerCase()] = String(args[1]);
         } catch (e) {}
-        return setHeader.apply(this, arguments);
-      };
-      proto.send = function () {
+        return apply(setHeader, self, args);
+      });
+      proto.send = wrap(proto.send, (xsend, self, args) => {
         try {
-          const request = requests.get(this);
+          const request = requests.get(self);
           if (request) {
-            requests.delete(this);
+            requests.delete(self);
             remember(request.url, request.headers);
             if (RX.test(request.url)) {
-              this.addEventListener('load', function () {
+              self.addEventListener('load', function () {
                 try {
                   if (this.responseType === '' || this.responseType === 'text') send(this.responseText);
-                  else if (this.responseType === 'json') send(JSON.stringify(this.response));
+                  else if (this.responseType === 'json') send(stringify(this.response));
                 } catch (e) {}
               });
             }
           }
         } catch (e) {}
-        return xsend.apply(this, arguments);
-      };
+        return apply(xsend, self, args);
+      });
+    })();
+    """#
+
+    /// Runs in `bridgeWorld`: forwards what `captureScript` sees to the app, and gives
+    /// `detailsScript` `window.__calsync.loadItems`, which loads meetings with the remembered
+    /// sign-in headers. None of it is visible to the page.
+    ///
+    /// The two scripts talk through a detached element, which the page can't reach. It goes to
+    /// `captureScript` as the `relatedTarget` of an event on the document, both scripts running
+    /// before any of the page's: WebKit doesn't say which world's scripts run first, so this
+    /// one offers it when it starts and again when `captureScript` says hello, until taken.
+    static let bridgeScript = #"""
+    (function () {
+      if (window.__calsync) return;
+      const handler = window.webkit.messageHandlers.calsync;
+      // Outlook's last service call: { url, headers }.
+      let service = null;
+
+      const port = document.createElement('div');
+      port.addEventListener('calsync-response', () => {
+        try { handler.postMessage(port.getAttribute('data')); } catch (e) {}
+      });
+      port.addEventListener('calsync-service', () => {
+        try { service = JSON.parse(port.getAttribute('data')); } catch (e) {}
+      });
+      function offer() {
+        document.dispatchEvent(new MouseEvent('calsync-port', { relatedTarget: port }));
+        if (port.hasAttribute('connected')) document.removeEventListener('calsync-hello', offer);
+      }
+      document.addEventListener('calsync-hello', offer);
+      offer();
 
       // Asks Outlook's service for the meetings in full, as Outlook itself does when a
       // meeting is opened, with the sign-in headers of its last service call. Sends the
@@ -440,7 +511,7 @@ final class OutlookWebSource: NSObject, ObservableObject {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 20000);
           try {
-            const r = await nativeFetch.call(window, url.href, {
+            const r = await fetch(url.href, {
               method: 'POST', headers, body, credentials: 'include', signal: controller.signal,
             });
             return r.ok ? await r.text() : null;
@@ -485,8 +556,8 @@ final class OutlookWebSource: NSObject, ObservableObject {
     })();
     """#
 
-    /// Runs in the page (`callAsyncJavaScript`, with `ids`): loads the meetings in full
-    /// through `captureScript`'s `loadItems`. Returns the response texts.
+    /// Runs in `bridgeWorld` (`callAsyncJavaScript`, with `ids`): loads the meetings in full
+    /// through `bridgeScript`'s `loadItems`. Returns the response texts.
     static let detailsScript = #"""
     const api = window.__calsync;
     return api ? await api.loadItems(ids) : [];
