@@ -8,7 +8,7 @@
 
 A tiny macOS menu bar app that copies meetings from your client calendars into your main calendar, so colleagues stop booking you over your client standup.
 
-[![Version 1.1.14](https://img.shields.io/badge/version-1.1.14-2563EB)](Support/Info.plist)
+[![Version 1.1.15](https://img.shields.io/badge/version-1.1.15-2563EB)](Support/Info.plist)
 [![Build](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111?logo=apple&logoColor=white)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white)

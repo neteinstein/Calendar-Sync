@@ -582,8 +582,22 @@ private struct UpdateInstructionsSheet: View {
 
     /// Running from Homebrew's cellar means it was installed with `brew`. `brew services` starts it
     /// through the opt symlink, which the bundle path keeps, so resolve that first.
-    private var isHomebrewInstall: Bool {
-        Bundle.main.bundleURL.resolvingSymlinksInPath().path.contains("/Cellar/")
+    private var cellarPath: String? {
+        let path = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        guard let range = path.range(of: "/Cellar/") else { return nil }
+        return String(path[..<range.upperBound])
+    }
+
+    private var isHomebrewInstall: Bool { cellarPath != nil }
+
+    /// The account that owns Homebrew when it isn't the one running the app: Homebrew installed
+    /// from a separate admin account. Only that account can run `brew update` and `brew upgrade`.
+    private var brewOwner: String? {
+        guard let cellarPath,
+              let owner = try? FileManager.default.attributesOfItem(atPath: cellarPath)[.ownerAccountName] as? String,
+              owner != NSUserName()
+        else { return nil }
+        return owner
     }
 
     /// launchd sets XPC_SERVICE_NAME to the job's label: sh.brew.calendar-sync under `brew services`
@@ -592,41 +606,39 @@ private struct UpdateInstructionsSheet: View {
         ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"]?.hasSuffix(".calendar-sync") == true
     }
 
-    private var commands: String {
-        isHomebrewInstall
-            ? "brew update\nbrew upgrade calendar-sync" + (isBrewService ? "\nbrew services restart calendar-sync" : "")
-            : """
-            cd Calendar-Sync
-            git pull
-            scripts/build-app.sh
-            open "build/Calendar Sync.app"
-            """
-    }
+    private let upgradeCommands = "brew update\nbrew upgrade calendar-sync"
+    private let restartCommand = "brew services restart calendar-sync"
+
+    private let sourceCommands = """
+        cd Calendar-Sync
+        git pull
+        scripts/build-app.sh
+        open "build/Calendar Sync.app"
+        """
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Update to version \(latest.version)").font(.headline)
-            Text(isHomebrewInstall
-                 ? "Calendar Sync was installed with Homebrew. Quit the app, then run this in Terminal:"
-                 : "Calendar Sync is built from source. Quit the app, then run this in Terminal, from the folder you cloned it into:")
-                .fixedSize(horizontal: false, vertical: true)
-            GroupBox {
-                Text(commands)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(4)
-            }
-            Text(isHomebrewInstall
-                 ? "Your settings are kept. The build is ad-hoc signed, so macOS asks for calendar access again after the upgrade."
-                 : "That pulls the new version, rebuilds the app and opens it. Your settings are kept. Local builds are ad-hoc signed, so macOS asks for calendar access again after the rebuild. Installed with Homebrew instead? Run “brew update && brew upgrade calendar-sync”.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Copy commands") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(commands, forType: .string)
+            if !isHomebrewInstall {
+                instruction("Calendar Sync is built from source. Quit the app, then run this in Terminal, from the folder you cloned it into:")
+                CommandBox(commands: sourceCommands)
+                note("That pulls the new version, rebuilds the app and opens it. Your settings are kept. Local builds are ad-hoc signed, so macOS asks for calendar access again after the rebuild. Installed with Homebrew instead? Run “brew update && brew upgrade calendar-sync”.")
+            } else if let brewOwner {
+                instruction("Calendar Sync was installed with Homebrew from the “\(brewOwner)” account, so the upgrade runs there. Quit the app, then in Terminal, logged in as \(brewOwner) (for example with “su - \(brewOwner)”), run:")
+                CommandBox(commands: upgradeCommands)
+                if isBrewService {
+                    instruction("Then, back in this account (\(NSUserName())), the one that runs the app, restart it:")
+                    CommandBox(commands: restartCommand)
+                } else {
+                    instruction("Then open Calendar Sync again from this account (\(NSUserName())).")
                 }
+                note("Only the account that owns Homebrew can upgrade it, but “brew services” has to run from the account logged in to the desktop: from the admin account it fails with “Domain does not support specified action”. From this account brew may also print a “Permission denied” error about a lock file in /opt/homebrew/var: it can't refresh the admin account's download cache, which is harmless, and the restart still happens. Your settings are kept. The build is ad-hoc signed, so macOS asks for calendar access again after the upgrade.")
+            } else {
+                instruction("Calendar Sync was installed with Homebrew. Quit the app, then run this in Terminal:")
+                CommandBox(commands: upgradeCommands + (isBrewService ? "\n" + restartCommand : ""))
+                note("Homebrew in a separate admin account? Run “brew update” and “brew upgrade calendar-sync” from the admin account, and “\(restartCommand)” from the account that runs the app. Your settings are kept. The build is ad-hoc signed, so macOS asks for calendar access again after the upgrade.")
+            }
+            HStack {
                 if let url = latest.url {
                     Button("What's new on GitHub") { openURL(url) }
                 }
@@ -636,6 +648,38 @@ private struct UpdateInstructionsSheet: View {
         }
         .padding(20)
         .frame(width: 480)
+    }
+
+    private func instruction(_ text: String) -> some View {
+        Text(text).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Commands to run in Terminal, selectable and with their own copy button, so that commands meant
+/// for different accounts are copied separately.
+private struct CommandBox: View {
+    let commands: String
+
+    var body: some View {
+        GroupBox {
+            HStack(alignment: .top) {
+                Text(commands)
+                    .font(.body.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(commands, forType: .string)
+                }
+            }
+            .padding(4)
+        }
     }
 }
 
