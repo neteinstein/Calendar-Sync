@@ -8,6 +8,8 @@ struct CalendarSyncApp: App {
     @StateObject private var alerts: EventAlertController
     @StateObject private var updates = UpdateChecker()
     @StateObject private var clock = Clock()
+    @StateObject private var menuBarItem = MenuBarItem.shared
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// Held until the process ends. See `InstanceLock`.
     private static var instanceLock: InstanceLock?
@@ -33,6 +35,7 @@ struct CalendarSyncApp: App {
         do {
             guard let lock = try InstanceLock.acquire(at: url) else {
                 NSLog("Calendar Sync is already running, so this copy quits.")
+                AppDelegate.askRunningCopyToShowMenuBarItem()
                 exit(0)
             }
             instanceLock = lock
@@ -106,7 +109,7 @@ struct CalendarSyncApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $menuBarItem.isInserted) {
             MenuView()
                 .environmentObject(settings)
                 .environmentObject(controller)
@@ -121,6 +124,59 @@ struct CalendarSyncApp: App {
                 .environmentObject(controller)
                 .environmentObject(updates)
         }
+    }
+}
+
+/// Whether the menu bar icon is in the menu bar, as the `MenuBarExtra`'s binding. Without a
+/// binding, SwiftUI quits the app when the icon is removed: hidden in System Settings › Menu Bar,
+/// or ⌘-dragged out. Then every launch ended a second later and nothing synced. With it the app
+/// keeps running and syncing without the icon, and opening the app again puts the icon back.
+@MainActor
+final class MenuBarItem: ObservableObject {
+    static let shared = MenuBarItem()
+
+    /// Publishes only real changes: SwiftUI writes the binding back while it updates the scene,
+    /// and publishing every write re-renders the scene, which writes it again, without end.
+    var isInserted: Bool {
+        get { inserted }
+        set {
+            guard newValue != inserted else { return }
+            objectWillChange.send()
+            inserted = newValue
+            NSLog(newValue
+                  ? "Calendar Sync's menu bar icon is back."
+                  : "Calendar Sync's menu bar icon was removed. The app keeps syncing; open it again to bring the icon back.")
+        }
+    }
+
+    private var inserted = true
+}
+
+/// Puts the menu bar icon back when the app is opened again while it runs.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Posted by a later copy as it quits, so opening the app again works whichever way it was
+    /// started.
+    nonisolated private static let showMenuBarItem = Notification.Name("org.neteinstein.calendarsync.showMenuBarItem")
+
+    nonisolated static func askRunningCopyToShowMenuBarItem() {
+        DistributedNotificationCenter.default().postNotificationName(
+            showMenuBarItem, object: nil, userInfo: nil, deliverImmediately: true
+        )
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(
+            forName: Self.showMenuBarItem, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { MenuBarItem.shared.isInserted = true }
+        }
+    }
+
+    /// Opening the app while it runs: Finder, Spotlight or `open`.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MenuBarItem.shared.isInserted = true
+        return true
     }
 }
 
