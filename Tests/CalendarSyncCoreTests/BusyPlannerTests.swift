@@ -2,8 +2,8 @@ import XCTest
 @testable import CalendarSyncCore
 
 final class BusyPlannerTests: XCTestCase {
-    let clientA = SourceConfig(kind: .eventKit(calendarID: "client-a"), calendarName: "Calendar A", showBusyInClient: true)
-    let clientB = SourceConfig(kind: .eventKit(calendarID: "client-b"), calendarName: "Calendar B")
+    let secondaryA = SourceConfig(kind: .eventKit(calendarID: "secondary-a"), calendarName: "Calendar A", showBusyInSecondary: true)
+    let secondaryB = SourceConfig(kind: .eventKit(calendarID: "secondary-b"), calendarName: "Calendar B")
     let base = Date(timeIntervalSince1970: 1_800_000_000)
 
     func event(_ key: String, _ title: String, at hour: Double, notes: String? = nil) -> SourceEvent {
@@ -26,7 +26,7 @@ final class BusyPlannerTests: XCTestCase {
     }
 
     func testBusyEventsCarryNoDetails() {
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success([event("m1", "Salary review with HR", at: 2)]),
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([event("m1", "Salary review with HR", at: 2)]),
                                         existing: [], options: SyncOptions())
         XCTAssertEqual(plan.creates, 1)
         guard case .create(let spec) = plan.actions[0] else { return XCTFail() }
@@ -42,9 +42,9 @@ final class BusyPlannerTests: XCTestCase {
     }
 
     func testOutOfOfficeStyleCarriesNoDetailsEither() {
-        var client = clientA
-        client.busyStyle = .outOfOffice
-        let plan = SyncPlanner.planBusy(for: client, mainEvents: .success([event("m1", "Salary review with HR", at: 2)]),
+        var secondary = secondaryA
+        secondary.busyStyle = .outOfOffice
+        let plan = SyncPlanner.planBusy(for: secondary, mainEvents: .success([event("m1", "Salary review with HR", at: 2)]),
                                         existing: [], options: SyncOptions())
         XCTAssertEqual(plan.creates, 1)
         guard case .create(let spec) = plan.actions[0] else { return XCTFail() }
@@ -61,7 +61,7 @@ final class BusyPlannerTests: XCTestCase {
         holiday.timeZone = TimeZone(identifier: "Europe/Lisbon")
         var call = event("c", "Call", at: 4)
         call.timeZone = TimeZone(identifier: "America/New_York")
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success([holiday, call]), existing: [], options: SyncOptions())
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([holiday, call]), existing: [], options: SyncOptions())
         let specs = plan.actions.compactMap { if case .create(let s) = $0 { s } else { nil } }
         XCTAssertEqual(specs.map(\.isAllDay), [true, false])
         XCTAssertNil(specs[0].timeZone, "all-day events are floating")
@@ -70,10 +70,10 @@ final class BusyPlannerTests: XCTestCase {
 
     func testSwitchingStyleUpdatesExistingCopies() {
         let main = [event("m1", "A", at: 1)]
-        let first = SyncPlanner.planBusy(for: clientA, mainEvents: .success(main), existing: [], options: SyncOptions())
-        var client = clientA
-        client.busyStyle = .outOfOffice
-        let switched = SyncPlanner.planBusy(for: client, mainEvents: .success(main),
+        let first = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success(main), existing: [], options: SyncOptions())
+        var secondary = secondaryA
+        secondary.busyStyle = .outOfOffice
+        let switched = SyncPlanner.planBusy(for: secondary, mainEvents: .success(main),
                                             existing: copies(from: first), options: SyncOptions())
         XCTAssertEqual(switched.updates, 1, "the same event is kept, only the title changes")
         XCTAssertEqual(switched.creates, 0)
@@ -82,25 +82,25 @@ final class BusyPlannerTests: XCTestCase {
         XCTAssertEqual(spec.title, "Out of office")
     }
 
-    func testSkipsCopiesOfTheSameClientButShowsOtherClients() {
-        let main = [copyOf(clientA, key: "a1", at: 1), copyOf(clientB, key: "b1", at: 3), event("own", "Dentist", at: 5)]
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success(main), existing: [], options: SyncOptions())
+    func testSkipsCopiesOfTheSameCalendarButShowsOtherSecondaryCalendars() {
+        let main = [copyOf(secondaryA, key: "a1", at: 1), copyOf(secondaryB, key: "b1", at: 3), event("own", "Dentist", at: 5)]
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success(main), existing: [], options: SyncOptions())
         let starts = plan.actions.compactMap { if case .create(let s) = $0 { s.start } else { nil } }
         XCTAssertEqual(starts, [base + 3 * 3600, base + 5 * 3600])
     }
 
     func testBusyEventsAreNeverCopiedBackIntoMain() {
-        var ooo = clientA
+        var ooo = secondaryA
         ooo.busyStyle = .outOfOffice
-        for client in [clientA, ooo] {
-            let plan = SyncPlanner.planBusy(for: client, mainEvents: .success([event("m1", "Dentist", at: 2)]),
+        for secondary in [secondaryA, ooo] {
+            let plan = SyncPlanner.planBusy(for: secondary, mainEvents: .success([event("m1", "Dentist", at: 2)]),
                                             existing: [], options: SyncOptions(skipOutOfOffice: false))
             guard case .create(let busy) = plan.actions[0] else { return XCTFail() }
-            // The client calendar now holds the Busy event; syncing that calendar into main must skip it,
+            // The secondary calendar now holds the Busy event; syncing that calendar into main must skip it,
             // also when the server hands the description back as HTML.
-            let clientEvents = [event("busy-event", busy.title, at: 2, notes: busy.notes),
+            let secondaryEvents = [event("busy-event", busy.title, at: 2, notes: busy.notes),
                                 event("busy-html", busy.title, at: 3, notes: "<p>\(busy.notes)</p>\r\n")]
-            let forward = SyncPlanner.plan(sources: [(client, .success(clientEvents))], existing: [],
+            let forward = SyncPlanner.plan(sources: [(secondary, .success(secondaryEvents))], existing: [],
                                            options: SyncOptions(skipOutOfOffice: false))
             XCTAssertTrue(forward.isEmpty)
         }
@@ -111,36 +111,36 @@ final class BusyPlannerTests: XCTestCase {
         XCTAssertTrue(CopyFormatter.isBusyEvent(title: "Out of office", notes: "Busy\n"))
         XCTAssertTrue(CopyFormatter.isBusyEvent(title: "Busy", notes: "<html><body><p>Busy</p></body></html>"))
         // Made by an older version, with a hidden marker.
-        let legacy = CopyMarker(sourceID: clientA.id, key: "busy-1a2b").encoded
+        let legacy = CopyMarker(sourceID: secondaryA.id, key: "busy-1a2b").encoded
         XCTAssertTrue(CopyFormatter.isBusyEvent(title: "Busy", notes: legacy))
-        // The client's own events.
+        // The secondary calendar's own events.
         XCTAssertFalse(CopyFormatter.isBusyEvent(title: "Busy", notes: nil))
         XCTAssertFalse(CopyFormatter.isBusyEvent(title: "Busy", notes: "Busy with the release"))
         XCTAssertFalse(CopyFormatter.isBusyEvent(title: "Focus time", notes: "Busy"))
         // A copy in the main calendar isn't a Busy event.
-        let copy = "Copied by Calendar Sync.\n\n" + CopyMarker(sourceID: clientA.id, key: "m1").encoded
+        let copy = "Copied by Calendar Sync.\n\n" + CopyMarker(sourceID: secondaryA.id, key: "m1").encoded
         XCTAssertFalse(CopyFormatter.isBusyEvent(title: "Busy", notes: copy))
     }
 
     func testOneBusyEventPerTime() {
         let main = [event("m1", "A", at: 1), event("m2", "B", at: 1), event("m3", "C", at: 2)]
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success(main), existing: [], options: SyncOptions())
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success(main), existing: [], options: SyncOptions())
         XCTAssertEqual(plan.creates, 2)
-        // A duplicate already in the client calendar is removed.
+        // A duplicate already in the secondary calendar is removed.
         var existing = copies(from: plan)
         existing.append(ExistingCopy(eventID: "dupe", marker: nil, title: "Busy", start: base + 3600, end: base + 2 * 3600,
                                      isAllDay: false, url: nil, notes: "Busy"))
-        let next = SyncPlanner.planBusy(for: clientA, mainEvents: .success(main), existing: existing, options: SyncOptions())
+        let next = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success(main), existing: existing, options: SyncOptions())
         XCTAssertEqual(next.actions.count, 1)
         XCTAssertEqual(next.deletes, 1)
         XCTAssertEqual(next.unchangedCount, 2)
     }
 
     func testBusyEventsFromOlderVersionsLoseTheirMarker() {
-        let marker = CopyMarker(sourceID: clientA.id, key: "busy-1a2b")
+        let marker = CopyMarker(sourceID: secondaryA.id, key: "busy-1a2b")
         let legacy = ExistingCopy(eventID: "old", marker: marker, title: "Busy", start: base + 3600, end: base + 2 * 3600,
                                   isAllDay: false, url: nil, notes: marker.encoded)
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success([event("m1", "A", at: 1)]),
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([event("m1", "A", at: 1)]),
                                         existing: [legacy], options: SyncOptions())
         XCTAssertEqual(plan.actions.count, 1)
         guard case .update(let id, let spec) = plan.actions[0] else { return XCTFail() }
@@ -151,19 +151,19 @@ final class BusyPlannerTests: XCTestCase {
     func testHTMLDescriptionIsNotRewrittenEverySync() {
         let stored = ExistingCopy(eventID: "e", marker: nil, title: "Busy", start: base + 3600, end: base + 2 * 3600,
                                   isAllDay: false, url: nil, notes: "<p>Busy</p>")
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success([event("m1", "A", at: 1)]),
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([event("m1", "A", at: 1)]),
                                         existing: [stored], options: SyncOptions())
         XCTAssertTrue(plan.isEmpty)
     }
 
     func testSecondRunIsNoOpAndChangesFollow() {
         let main = [event("m1", "A", at: 1), event("m2", "B", at: 3)]
-        let first = SyncPlanner.planBusy(for: clientA, mainEvents: .success(main), existing: [], options: SyncOptions())
+        let first = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success(main), existing: [], options: SyncOptions())
         let existing = copies(from: first)
-        XCTAssertTrue(SyncPlanner.planBusy(for: clientA, mainEvents: .success(main), existing: existing, options: SyncOptions()).isEmpty)
+        XCTAssertTrue(SyncPlanner.planBusy(for: secondaryA, mainEvents: .success(main), existing: existing, options: SyncOptions()).isEmpty)
 
         // Busy events are matched by time: a moved meeting's Busy event is replaced.
-        let moved = SyncPlanner.planBusy(for: clientA, mainEvents: .success([event("m1", "A", at: 6)]),
+        let moved = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([event("m1", "A", at: 6)]),
                                          existing: existing, options: SyncOptions())
         XCTAssertEqual(moved.creates, 1)
         XCTAssertEqual(moved.deletes, 2)
@@ -171,19 +171,19 @@ final class BusyPlannerTests: XCTestCase {
     }
 
     func testFailureLeavesBusyEventsAlone() {
-        let first = SyncPlanner.planBusy(for: clientA, mainEvents: .success([event("m1", "A", at: 1)]),
+        let first = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([event("m1", "A", at: 1)]),
                                          existing: [], options: SyncOptions())
-        let next = SyncPlanner.planBusy(for: clientA, mainEvents: .failure("Main calendar not found"),
+        let next = SyncPlanner.planBusy(for: secondaryA, mainEvents: .failure("Main calendar not found"),
                                         existing: copies(from: first), options: SyncOptions())
         XCTAssertTrue(next.isEmpty)
-        XCTAssertEqual(next.failedSources[clientA.id], "Main calendar not found")
+        XCTAssertEqual(next.failedSources[secondaryA.id], "Main calendar not found")
     }
 
     func testTurningBusyOffTakesBackBusyEvents() {
-        let first = SyncPlanner.planBusy(for: clientA, mainEvents: .success([event("m1", "A", at: 1), event("m2", "B", at: 3)]),
+        let first = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([event("m1", "A", at: 1), event("m2", "B", at: 3)]),
                                          existing: [], options: SyncOptions())
         var existing = copies(from: first)
-        let marker = CopyMarker(sourceID: clientA.id, key: "busy-1a2b")
+        let marker = CopyMarker(sourceID: secondaryA.id, key: "busy-1a2b")
         existing.append(ExistingCopy(eventID: "legacy", marker: marker, title: "Busy", start: base, end: base + 3600,
                                      isAllDay: false, url: nil, notes: marker.encoded))
 
@@ -202,7 +202,7 @@ final class BusyPlannerTests: XCTestCase {
         var declined = event("d", "Declined", at: 1); declined.isDeclined = true
         var allDay = event("a", "Holiday", at: 2); allDay.isAllDay = true
         var cancelled = event("c", "Cancelled", at: 3); cancelled.isCancelled = true
-        let plan = SyncPlanner.planBusy(for: clientA, mainEvents: .success([declined, allDay, cancelled]),
+        let plan = SyncPlanner.planBusy(for: secondaryA, mainEvents: .success([declined, allDay, cancelled]),
                                         existing: [], options: SyncOptions(skipDeclined: true, skipAllDay: true))
         XCTAssertTrue(plan.isEmpty)
     }
@@ -210,12 +210,19 @@ final class BusyPlannerTests: XCTestCase {
     func testOldSettingsStillDecode() throws {
         let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","kind":{"outlookWeb":{}},"calendarName":"Calendar B","hideMeetingName":true,"isEnabled":true}"#
         let decoded = try JSONDecoder().decode(SourceConfig.self, from: Data(old.utf8))
-        XCTAssertFalse(decoded.showBusyInClient)
+        XCTAssertFalse(decoded.showBusyInSecondary)
         XCTAssertEqual(decoded.busyStyle, .busy)
         XCTAssertTrue(decoded.hideMeetingName)
-        var ooo = clientA
+        var ooo = secondaryA
         ooo.busyStyle = .outOfOffice
         let roundTrip = try JSONDecoder().decode(SourceConfig.self, from: JSONEncoder().encode(ooo))
         XCTAssertEqual(roundTrip, ooo)
+    }
+
+    func testShowBusyKeepsItsSavedKey() throws {
+        let saved = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","kind":{"outlookWeb":{}},"calendarName":"Calendar B","showBusyInClient":true}"#
+        XCTAssertTrue(try JSONDecoder().decode(SourceConfig.self, from: Data(saved.utf8)).showBusyInSecondary)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(secondaryA)) as? [String: Any]
+        XCTAssertEqual(encoded?["showBusyInClient"] as? Bool, true)
     }
 }

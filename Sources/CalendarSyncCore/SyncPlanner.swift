@@ -59,16 +59,16 @@ public enum SyncPlanner {
         return SyncPlan(actions: actions, failedSources: failed, unchangedCount: unchanged)
     }
 
-    /// Plans the "Busy" events that show the main calendar inside one client calendar.
+    /// Plans the "Busy" events that show the main calendar inside one secondary calendar.
     ///
     /// Busy events carry nothing but their times, so they're matched to the main calendar by
     /// time: one per distinct time, and a meeting that moves gets its Busy event removed and
     /// another added at the new time.
     ///
     /// - Parameters:
-    ///   - source: the client calendar to write into.
+    ///   - source: the secondary calendar to write into.
     ///   - mainEvents: the main calendar's events for the sync window.
-    ///   - existing: the Busy events currently in the client calendar.
+    ///   - existing: the Busy events currently in the secondary calendar.
     ///   - calendar: whose days all-day events are compared by.
     public static func planBusy(
         for source: SourceConfig,
@@ -116,7 +116,7 @@ public enum SyncPlanner {
         return SyncPlan(actions: actions, failedSources: [:], unchangedCount: unchanged)
     }
 
-    /// Takes back the Busy events in a client calendar that no longer asks for them. Left
+    /// Takes back the Busy events in a secondary calendar that no longer asks for them. Left
     /// there, they'd go on showing the main calendar as it was when they were last updated.
     ///
     /// - Parameter addedHere: whether Busy events were added to this calendar since they stopped
@@ -144,8 +144,8 @@ public enum SyncPlanner {
         if event.isCancelled { return false }
         if options.skipDeclined && event.isDeclined { return false }
         if options.skipAllDay && event.isAllDay { return false }
-        // Copies of this client's own meetings are already in its calendar. Copies from other
-        // client calendars are shown, so each client sees time booked by the others.
+        // Copies of this calendar's own meetings are already in its calendar. Copies from other
+        // secondary calendars are shown, so each one sees time booked by the others.
         if CopyMarker.find(in: event.notes)?.sourceID == source.id { return false }
         return event.end >= event.start
     }

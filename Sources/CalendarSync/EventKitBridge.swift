@@ -97,13 +97,13 @@ final class EventKitBridge {
         }
     }
 
-    /// The Busy events in a client calendar (see `CopyFormatter.isBusyEvent`). Ones made by
+    /// The Busy events in a secondary calendar (see `CopyFormatter.isBusyEvent`). Ones made by
     /// older versions come with their marker.
     func busyEvents(calendarID: String, from start: Date, to end: Date) -> [ExistingCopy]? {
         guard let calendar = store.calendar(withIdentifier: calendarID) else { return nil }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [calendar])
         return store.events(matching: predicate).compactMap { event in
-            // Busy events never have attendees or repeat, so a client meeting that only looks
+            // Busy events never have attendees or repeat, so a secondary-calendar meeting that only looks
             // like one is left alone.
             guard !event.hasAttendees, !event.hasRecurrenceRules,
                   CopyFormatter.isBusyEvent(title: event.title, notes: event.notes),
