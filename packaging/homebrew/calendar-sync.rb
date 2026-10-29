@@ -11,7 +11,7 @@
 # to match Support/Info.plist, and set `sha256` to the output of
 #   curl -L <url> | shasum -a 256
 class CalendarSync < Formula
-  desc "Menu bar app that copies client-calendar meetings into your main calendar"
+  desc "Menu bar app that copies secondary-calendar meetings into your main calendar"
   homepage "https://github.com/neteinstein/Calendar-Sync"
   url "https://github.com/neteinstein/Calendar-Sync/archive/6553dc30bd4f34ec333225ebf7e69f61c05e402d.tar.gz"
   version "0.1.0"

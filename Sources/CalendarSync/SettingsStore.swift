@@ -15,10 +15,10 @@ final class SettingsStore: ObservableObject {
     @Published var menuCalendar: MenuCalendarOptions { didSet { save(menuCalendar, "menuCalendar") } }
     @Published var targetCalendarID: String? { didSet { defaults.set(targetCalendarID, forKey: "targetCalendarID") } }
     @Published var intervalMinutes: Int { didSet { defaults.set(intervalMinutes, forKey: "intervalMinutes") } }
-    /// The main calendar is also shown as Busy in the client calendars, in each one whose
-    /// `showBusyInClient` is on.
+    /// The main calendar is also shown as Busy in the secondary calendars, in each one whose
+    /// `showBusyInSecondary` is on.
     @Published var twoWaySync: Bool { didSet { defaults.set(twoWaySync, forKey: "twoWaySync") } }
-    /// Not a setting: the client calendars Busy events were added to. Only in these are
+    /// Not a setting: the secondary calendars Busy events were added to. Only in these are
     /// events that look like Busy events taken back when they're no longer wanted.
     var busyCalendarIDs: Set<String> {
         didSet { if busyCalendarIDs != oldValue { defaults.set(busyCalendarIDs.sorted(), forKey: "busyCalendarIDs") } }
@@ -39,7 +39,7 @@ final class SettingsStore: ObservableObject {
         let interval = defaults.integer(forKey: "intervalMinutes")
         intervalMinutes = interval > 0 ? interval : 15
         // Older versions had only the per-calendar choice; keep the calendars that made it.
-        twoWaySync = defaults.object(forKey: "twoWaySync") as? Bool ?? sources.contains(where: \.showBusyInClient)
+        twoWaySync = defaults.object(forKey: "twoWaySync") as? Bool ?? sources.contains(where: \.showBusyInSecondary)
         busyCalendarIDs = Set(defaults.stringArray(forKey: "busyCalendarIDs") ?? [])
     }
 

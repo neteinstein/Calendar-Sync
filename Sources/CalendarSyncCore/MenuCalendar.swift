@@ -77,7 +77,7 @@ public enum MenuCalendar {
         return parts
     }
 
-    /// The client calendar an event in the main calendar was copied from, or nil for the main
+    /// The secondary calendar an event in the main calendar was copied from, or nil for the main
     /// calendar's own events.
     public static func originID(of event: SourceEvent) -> UUID? {
         CopyMarker.find(in: event.notes)?.sourceID

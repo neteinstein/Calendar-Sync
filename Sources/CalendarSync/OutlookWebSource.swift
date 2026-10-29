@@ -3,7 +3,7 @@ import CalendarSyncCore
 import Foundation
 import WebKit
 
-/// Reads a client's Outlook / Microsoft 365 calendar through a built-in browser window,
+/// Reads an Outlook / Microsoft 365 calendar through a built-in browser window,
 /// for accounts that can't be added to Calendar.app.
 ///
 /// The user signs in once in the window (MFA included). Each sync reloads the Outlook
@@ -22,7 +22,7 @@ import WebKit
 /// change at any time. If a sync can't find calendar data, the copies are left untouched.
 @MainActor
 final class OutlookWebSource: NSObject, ObservableObject {
-    /// Change if the client uses a different Outlook host (e.g. outlook.office365.com).
+    /// Change if the account uses a different Outlook host (e.g. outlook.office365.com).
     static let host = "https://outlook.office.com"
 
     @Published private(set) var needsSignIn = false
@@ -40,7 +40,7 @@ final class OutlookWebSource: NSObject, ObservableObject {
         self.sourceID = sourceID
 
         let config = WKWebViewConfiguration()
-        // One persistent cookie store per source, so several Outlook clients can each stay
+        // One persistent cookie store per source, so several Outlook accounts can each stay
         // signed in.
         config.websiteDataStore = WKWebsiteDataStore(forIdentifier: sourceID)
         config.userContentController.addUserScript(

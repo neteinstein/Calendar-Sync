@@ -3,7 +3,7 @@ import CalendarSyncCore
 import SwiftUI
 
 /// The month grid and event list shown at the top of the menu when "Show a calendar in the
-/// menu" is on. Events come from the main calendar, where client meetings are already copied.
+/// menu" is on. Events come from the main calendar, where secondary-calendar meetings are already copied.
 struct MenuCalendarView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var controller: SyncController
@@ -232,7 +232,7 @@ struct MenuCalendarView: View {
             .id(event.key)
     }
 
-    /// Soft colors for client calendars without one of their own (Outlook on the web).
+    /// Soft colors for secondary calendars without one of their own (Outlook on the web).
     private static let fallbackColors: [Color] = [.teal, .orange, .pink, .purple, .green, .blue]
 
     /// The color of the calendar an event was copied from: its Calendar.app color when it has

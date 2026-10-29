@@ -1,6 +1,6 @@
 import Foundation
 
-/// Decides which client calendars are due to be read. Each calendar uses its own interval
+/// Decides which secondary calendars are due to be read. Each calendar uses its own interval
 /// when it has one, otherwise the app-wide interval.
 public enum SyncSchedule {
     public static let minMinutes = 1

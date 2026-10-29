@@ -35,9 +35,9 @@ public enum CopyFormatter {
         return (notes?.isEmpty == false ? notes : nil, location?.isEmpty == false ? location : nil)
     }
 
-    /// A main-calendar event shown in a client calendar: the time and "Busy" (or "Out of
+    /// A main-calendar event shown in a secondary calendar: the time and "Busy" (or "Out of
     /// office"), nothing else. The description says "Busy" too, and there is no hidden marker,
-    /// so nothing in the client calendar points back to the original event or to this app.
+    /// so nothing in the secondary calendar points back to the original event or to this app.
     public static func busySpec(for event: SourceEvent, source: SourceConfig) -> CopySpec {
         CopySpec(
             marker: nil,
@@ -53,10 +53,10 @@ public enum CopyFormatter {
     }
 
     /// The whole description of every Busy event. It's how they are told apart from the
-    /// client's own events.
+    /// secondary calendar's own events.
     public static let busyNotes = "Busy"
 
-    /// Whether an event in a client calendar is a Busy event: titled like one with "Busy" as
+    /// Whether an event in a secondary calendar is a Busy event: titled like one with "Busy" as
     /// its description, or carrying the hidden marker older versions gave them.
     public static func isBusyEvent(title: String?, notes: String?) -> Bool {
         if let marker = CopyMarker.find(in: notes) { return marker.key.hasPrefix(busyKeyPrefix) }

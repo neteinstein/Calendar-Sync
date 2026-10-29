@@ -2,7 +2,7 @@ import XCTest
 @testable import CalendarSyncCore
 
 final class SyncPlannerTests: XCTestCase {
-    let source = SourceConfig(kind: .eventKit(calendarID: "client-cal"), calendarName: "Calendar A")
+    let source = SourceConfig(kind: .eventKit(calendarID: "secondary-cal"), calendarName: "Calendar A")
     let base = Date(timeIntervalSince1970: 1_800_000_000)
 
     func event(_ key: String, _ title: String, at hour: Double, url: URL? = nil) -> SourceEvent {

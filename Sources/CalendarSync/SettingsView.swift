@@ -7,7 +7,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
-            SourcesTab().tabItem { Label("Client(s) to Main Calendar", systemImage: "calendar") }
+            SourcesTab().tabItem { Label("Secondary Calendars", systemImage: "calendar") }
             TwoWaySyncTab().tabItem { Label("Two way sync", systemImage: "arrow.left.arrow.right") }
             PreviewTab().tabItem { Label("Preview", systemImage: "eye") }
             AuthorTab().tabItem { Label("Author", systemImage: "person.crop.circle") }
@@ -36,7 +36,7 @@ private struct GeneralTab: View {
                     }
                 }
                 .onChange(of: settings.targetCalendarID) { _, _ in Task { await controller.sync() } }
-                Text("Client meetings are copied into this calendar. It must be added to Calendar.app.")
+                Text("Meetings from your secondary calendars are copied into this calendar. It must be added to Calendar.app.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -48,7 +48,7 @@ private struct GeneralTab: View {
                 Toggle("Skip all-day events", isOn: $settings.options.skipAllDay)
                 Toggle("Skip out-of-office events", isOn: $settings.options.skipOutOfOffice)
             } footer: {
-                Text("Each client calendar can use its own interval instead (Client(s) to Main Calendar tab). Calendar.app calendars also sync about 10 seconds after a change.")
+                Text("Each secondary calendar can use its own interval instead (Secondary Calendars tab). Calendar.app calendars also sync about 10 seconds after a change.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -116,9 +116,9 @@ private struct SourcesTab: View {
         VStack(alignment: .leading, spacing: 0) {
             if settings.sources.isEmpty {
                 ContentUnavailableView(
-                    "No client calendars yet",
+                    "No secondary calendars yet",
                     systemImage: "calendar.badge.plus",
-                    description: Text("Add a client calendar to start copying its meetings."))
+                    description: Text("Add a secondary calendar to start copying its meetings."))
             } else {
                 Form {
                     ForEach($settings.sources) { $source in
@@ -129,14 +129,14 @@ private struct SourcesTab: View {
             }
 
             HStack {
-                Menu("Add client calendar") {
+                Menu("Add secondary calendar") {
                     Section("From Calendar.app") {
                         ForEach(availableCalendars, id: \.calendarIdentifier) { calendar in
                             Button("\(calendar.title) (\(calendar.source.title))") {
                                 settings.sources.append(SourceConfig(
                                     kind: .eventKit(calendarID: calendar.calendarIdentifier),
                                     calendarName: calendar.title,
-                                    showBusyInClient: settings.twoWaySync && calendar.allowsContentModifications))
+                                    showBusyInSecondary: settings.twoWaySync && calendar.allowsContentModifications))
                             }
                         }
                     }
@@ -190,7 +190,7 @@ private struct SourceRow: View {
         Section {
             if source.kind == .outlookWeb {
                 // Bordered and named after what it changes: as a plain form row it read as a fixed value.
-                TextField("Prefix for copies", text: $source.calendarName, prompt: Text("e.g. client name"))
+                TextField("Prefix for copies", text: $source.calendarName, prompt: Text("e.g. Work"))
                     .textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: 240)
@@ -253,7 +253,7 @@ private struct SourceRow: View {
 
 // MARK: - Two way sync
 
-/// Pushes the main calendar into the client calendars, as Busy events with no other details.
+/// Pushes the main calendar into the secondary calendars, as Busy events with no other details.
 private struct TwoWaySyncTab: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var controller: SyncController
@@ -263,18 +263,18 @@ private struct TwoWaySyncTab: View {
             Section {
                 Toggle("Sync both ways", isOn: $settings.twoWaySync)
                     .onChange(of: settings.twoWaySync) { _, on in
-                        if on { showBusyInEveryClientIfNoneChosen() }
+                        if on { showBusyInEverySecondaryIfNoneChosen() }
                         Task { await controller.sync() }
                     }
             } footer: {
-                Text("Your main calendar's events are also added to your client calendars as “Busy”, with nothing else: no title, link, location or attendees. Their description is “Busy” too, so you can tell what was added automatically. Copies of a client's own meetings aren't added back to it.")
+                Text("Your main calendar's events are also added to your secondary calendars as “Busy”, with nothing else: no title, link, location or attendees. Their description is “Busy” too, so you can tell what was added automatically. Copies of a calendar's own meetings aren't added back to it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             if settings.twoWaySync {
                 if !settings.sources.contains(where: { if case .eventKit = $0.kind { true } else { false } }) {
                     Section {
-                        Text("Add a client calendar from Calendar.app in the Client(s) to Main Calendar tab first.")
+                        Text("Add a secondary calendar from Calendar.app in the Secondary Calendars tab first.")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -294,22 +294,22 @@ private struct TwoWaySyncTab: View {
         .formStyle(.grouped)
     }
 
-    /// Turned on before any client calendar was chosen: choose every one Busy events can be
+    /// Turned on before any secondary calendar was chosen: choose every one Busy events can be
     /// added to. Choices made earlier are kept.
-    private func showBusyInEveryClientIfNoneChosen() {
-        guard !settings.sources.contains(where: \.showBusyInClient) else { return }
+    private func showBusyInEverySecondaryIfNoneChosen() {
+        guard !settings.sources.contains(where: \.showBusyInSecondary) else { return }
         settings.sources = settings.sources.map { source in
             var source = source
             if case .eventKit(let calendarID) = source.kind,
                controller.eventKit.calendar(id: calendarID)?.allowsContentModifications == true {
-                source.showBusyInClient = true
+                source.showBusyInSecondary = true
             }
             return source
         }
     }
 }
 
-/// Whether, and as what, the main calendar is shown in one client calendar.
+/// Whether, and as what, the main calendar is shown in one secondary calendar.
 private struct BusyRow: View {
     @Binding var source: SourceConfig
     let calendarID: String
@@ -319,10 +319,10 @@ private struct BusyRow: View {
         let calendar = controller.eventKit.calendar(id: calendarID)
         let writable = calendar?.allowsContentModifications ?? false
         Section {
-            Toggle("Show my main calendar here as “\(source.busyStyle.title)”", isOn: $source.showBusyInClient)
-                .disabled(!writable && !source.showBusyInClient)
-                .onChange(of: source.showBusyInClient) { _, _ in Task { await controller.sync() } }
-            if source.showBusyInClient {
+            Toggle("Show my main calendar here as “\(source.busyStyle.title)”", isOn: $source.showBusyInSecondary)
+                .disabled(!writable && !source.showBusyInSecondary)
+                .onChange(of: source.showBusyInSecondary) { _, _ in Task { await controller.sync() } }
+            if source.showBusyInSecondary {
                 Picker("Show it as", selection: $source.busyStyle) {
                     ForEach(BusyStyle.allCases, id: \.self) { style in
                         Text(style.title).tag(style)
@@ -378,7 +378,7 @@ private struct IntervalField: View {
     }
 }
 
-/// Subscribes to a client calendar link through Calendar.app, which then keeps it updated.
+/// Subscribes to a secondary calendar link through Calendar.app, which then keeps it updated.
 private struct CalendarLinkSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var link = ""
@@ -464,7 +464,7 @@ private struct PreviewTab: View {
         .padding()
     }
 
-    /// Main-calendar changes first, then the Busy events per client calendar.
+    /// Main-calendar changes first, then the Busy events per secondary calendar.
     private func previewRows(_ plan: SyncPlan) -> [EnumeratedSequence<[(action: SyncAction, title: String)]>.Element] {
         var rows = plan.actions.map { (action: $0, title: $0.title) }
         for busy in controller.busyPreview {

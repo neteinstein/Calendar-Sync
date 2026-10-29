@@ -5,11 +5,11 @@ public enum SourceKind: Codable, Hashable, Sendable {
     /// A calendar Calendar.app already knows about (Google, Exchange, iCloud, or a
     /// subscribed calendar link). Identified by `EKCalendar.calendarIdentifier`.
     case eventKit(calendarID: String)
-    /// A client's Outlook / Microsoft 365 calendar read through the built-in browser window.
+    /// An Outlook / Microsoft 365 calendar read through the built-in browser window.
     case outlookWeb
 }
 
-/// What the main calendar's events are shown as inside a client calendar.
+/// What the main calendar's events are shown as inside a secondary calendar.
 public enum BusyStyle: String, Codable, Hashable, Sendable, CaseIterable {
     case busy
     case outOfOffice
@@ -23,7 +23,7 @@ public enum BusyStyle: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
-/// One client calendar the user wants copied into the target calendar.
+/// One secondary calendar the user wants copied into the target calendar.
 public struct SourceConfig: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
     public var kind: SourceKind
@@ -34,10 +34,10 @@ public struct SourceConfig: Codable, Hashable, Identifiable, Sendable {
     /// When on, copies are titled `[Calendar A] Busy` instead of using the meeting name.
     public var hideMeetingName: Bool
     public var isEnabled: Bool
-    /// While syncing both ways, events in the main calendar are also added to this client
+    /// While syncing both ways, events in the main calendar are also added to this secondary
     /// calendar as plain "Busy" or "Out of office" events with no other details. Only possible
     /// for calendars that can be edited.
-    public var showBusyInClient: Bool
+    public var showBusyInSecondary: Bool
     /// What those events say: "Busy" or "Out of office".
     public var busyStyle: BusyStyle
     /// When on, copies also get the meeting's location and description. Ignored while
@@ -46,13 +46,20 @@ public struct SourceConfig: Codable, Hashable, Identifiable, Sendable {
     /// How often this calendar is read, in minutes. `nil` uses the app-wide interval.
     public var intervalMinutes: Int?
 
+    // `showBusyInSecondary` keeps the key older versions saved it under.
+    enum CodingKeys: String, CodingKey {
+        case id, kind, calendarName, hideMeetingName, isEnabled
+        case showBusyInSecondary = "showBusyInClient"
+        case busyStyle, copyDetails, intervalMinutes
+    }
+
     public init(
         id: UUID = UUID(),
         kind: SourceKind,
         calendarName: String,
         hideMeetingName: Bool = false,
         isEnabled: Bool = true,
-        showBusyInClient: Bool = false,
+        showBusyInSecondary: Bool = false,
         busyStyle: BusyStyle = .busy,
         copyDetails: Bool = false,
         intervalMinutes: Int? = nil
@@ -62,7 +69,7 @@ public struct SourceConfig: Codable, Hashable, Identifiable, Sendable {
         self.calendarName = calendarName
         self.hideMeetingName = hideMeetingName
         self.isEnabled = isEnabled
-        self.showBusyInClient = showBusyInClient
+        self.showBusyInSecondary = showBusyInSecondary
         self.busyStyle = busyStyle
         self.copyDetails = copyDetails
         self.intervalMinutes = intervalMinutes
@@ -76,7 +83,7 @@ public struct SourceConfig: Codable, Hashable, Identifiable, Sendable {
         calendarName = try c.decode(String.self, forKey: .calendarName)
         hideMeetingName = try c.decodeIfPresent(Bool.self, forKey: .hideMeetingName) ?? false
         isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
-        showBusyInClient = try c.decodeIfPresent(Bool.self, forKey: .showBusyInClient) ?? false
+        showBusyInSecondary = try c.decodeIfPresent(Bool.self, forKey: .showBusyInSecondary) ?? false
         busyStyle = try c.decodeIfPresent(BusyStyle.self, forKey: .busyStyle) ?? .busy
         copyDetails = try c.decodeIfPresent(Bool.self, forKey: .copyDetails) ?? false
         intervalMinutes = try c.decodeIfPresent(Int.self, forKey: .intervalMinutes)
@@ -88,7 +95,7 @@ public struct SyncOptions: Codable, Hashable, Sendable {
     public var daysAhead: Int
     public var skipDeclined: Bool
     public var skipAllDay: Bool
-    /// Skip client events shown as "Out of office" (holidays, leave), so they don't block the
+    /// Skip secondary-calendar events shown as "Out of office" (holidays, leave), so they don't block the
     /// main calendar.
     public var skipOutOfOffice: Bool
 
@@ -227,7 +234,7 @@ public struct SourceEvent: Hashable, Sendable {
     }
 }
 
-/// What a copy in the target calendar, or a Busy event in a client calendar, should look like.
+/// What a copy in the target calendar, or a Busy event in a secondary calendar, should look like.
 public struct CopySpec: Hashable, Sendable {
     /// The hidden tag at the end of the notes. Nil for a Busy event, which carries none.
     public var marker: CopyMarker?
@@ -258,7 +265,7 @@ public struct CopySpec: Hashable, Sendable {
     }
 }
 
-/// A copy that already exists in the target calendar, or a Busy event in a client calendar.
+/// A copy that already exists in the target calendar, or a Busy event in a secondary calendar.
 public struct ExistingCopy: Hashable, Sendable {
     /// `EKEvent.eventIdentifier`, used to update or delete it.
     public var eventID: String

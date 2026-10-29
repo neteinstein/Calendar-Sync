@@ -3,7 +3,7 @@ import EventKit
 import Foundation
 import WebKit
 
-/// Runs syncs: on a timer (each client calendar on its own interval), when Calendar data
+/// Runs syncs: on a timer (each secondary calendar on its own interval), when Calendar data
 /// changes, and on demand.
 @MainActor
 final class SyncController: ObservableObject {
@@ -13,7 +13,7 @@ final class SyncController: ObservableObject {
     @Published private(set) var lastSummary = "Not synced yet"
     @Published private(set) var problems: [String] = []
     @Published private(set) var preview: SyncPlan?
-    /// Busy events the next sync would add to client calendars, per client calendar.
+    /// Busy events the next sync would add to secondary calendars, per secondary calendar.
     @Published private(set) var busyPreview: [BusyPreview] = []
 
     struct BusyPreview: Identifiable {
@@ -26,7 +26,7 @@ final class SyncController: ObservableObject {
     let eventKit = EventKitBridge()
     private var outlookSources: [UUID: OutlookWebSource] = [:]
     private var timer: Timer?
-    /// When each client calendar was last read by a sync that applied its changes.
+    /// When each secondary calendar was last read by a sync that applied its changes.
     private var lastRead: [UUID: Date] = [:]
     private var storeObserver: NSObjectProtocol?
     private var pendingChangeSync: Task<Void, Never>?
@@ -76,7 +76,7 @@ final class SyncController: ObservableObject {
         await start()
     }
 
-    /// Checks every minute which client calendars are due, so each can have its own interval
+    /// Checks every minute which secondary calendars are due, so each can have its own interval
     /// and interval changes apply without restarting anything.
     private func startTimer() {
         timer?.invalidate()
@@ -105,7 +105,7 @@ final class SyncController: ObservableObject {
         await sync(only: due)
     }
 
-    /// Calendar.app changed (e.g. a client meeting moved): resync the Calendar.app sources
+    /// Calendar.app changed (e.g. a secondary-calendar meeting moved): resync the Calendar.app sources
     /// after a short pause. Outlook web sources wait for their interval, since reading them is slow.
     private func calendarDataChanged() {
         guard ContinuousClock.now > ignoreStoreChangesUntil else { return }
@@ -190,13 +190,13 @@ final class SyncController: ObservableObject {
         }
 
         // Then, when syncing both ways, show the main calendar (now including the new copies)
-        // as Busy in the client calendars that ask for it, and take the Busy events back from
+        // as Busy in the secondary calendars that ask for it, and take the Busy events back from
         // ones that no longer do.
         var busyPlans: [BusyPreview] = []
         for source in settings.sources where source.isEnabled {
             guard case .eventKit(let calendarID) = source.kind, calendarID != targetID,
                   let calendar = eventKit.calendar(id: calendarID) else { continue }
-            let showsBusy = settings.twoWaySync && source.showBusyInClient
+            let showsBusy = settings.twoWaySync && source.showBusyInSecondary
             guard calendar.allowsContentModifications else {
                 if showsBusy { problems.append("\(calendar.title): read-only, so Busy events can't be added.") }
                 continue
@@ -231,7 +231,7 @@ final class SyncController: ObservableObject {
 
         if apply {
             lastSync = Date()
-            // Counts copies of every client calendar, including ones not read this time.
+            // Counts copies of every secondary calendar, including ones not read this time.
             let copies = existing.count + plan.creates - plan.deletes
             lastSummary = plan.isEmpty
                 ? "Up to date (\(copies) copied meetings)"
