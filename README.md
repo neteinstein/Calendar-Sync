@@ -8,7 +8,7 @@
 
 A tiny macOS menu bar app that copies meetings from your secondary calendars into your main calendar, so colleagues stop booking you over meetings they can't see.
 
-[![Version 1.1.16](https://img.shields.io/badge/version-1.1.16-2563EB)](Support/Info.plist)
+[![Version 1.1.17](https://img.shields.io/badge/version-1.1.17-2563EB)](Support/Info.plist)
 [![Build](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/neteinstein/Calendar-Sync/actions/workflows/build.yml)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111?logo=apple&logoColor=white)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white)
@@ -188,6 +188,8 @@ Allow calendar access on first launch. Then open **Settings…** from the menu b
 2. **Secondary Calendars:** add each secondary calendar. For Outlook on the web, also give it a calendar name. Optionally turn on **Copy location and description** or **Use its own sync interval**.
 3. **Two way sync:** turn on **Sync both ways** to show your main calendar as **Busy** in your secondary calendars, so they all show the same booked time. Turning it on includes every secondary calendar you can edit; turn off **Show my main calendar here** for any that shouldn't, or pick **Out of office** instead of **Busy**.
 4. **Preview:** see what a sync would change, then let it run.
+
+**No icon in the menu bar?** If the icon is hidden, in System Settings › Menu Bar or by ⌘-dragging it out of the menu bar, Calendar Sync keeps running and syncing without it. Open the app again to bring the icon back. If it disappears again, turn Calendar Sync back on under **Allow in the Menu Bar** in System Settings › Menu Bar.
 
 > [!NOTE]
 > Local builds are ad-hoc signed, so macOS asks for calendar access again after each rebuild.
