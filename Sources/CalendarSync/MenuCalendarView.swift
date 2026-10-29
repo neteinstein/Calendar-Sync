@@ -114,6 +114,9 @@ struct MenuCalendarView: View {
     private func dayCell(_ day: Date, hasEvents: Bool) -> some View {
         let isToday = calendar.isDateInToday(day)
         let inMonth = calendar.isDate(day, equalTo: shownMonth, toGranularity: .month)
+        // Weekends get a soft gray background so they stand apart from working days.
+        let background: Color = isToday ? .accentColor
+            : calendar.isDateInWeekend(day) ? .secondary.opacity(0.12) : .clear
         return Button {
             selectedDay = day
         } label: {
@@ -129,7 +132,7 @@ struct MenuCalendarView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 3)
-            .background(isToday ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(background, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
