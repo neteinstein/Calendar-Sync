@@ -1,5 +1,6 @@
 import AppKit
 import CalendarSyncCore
+import Combine
 import SwiftUI
 
 /// Shows a full-screen alert when a main-calendar event starts, with buttons to join the
@@ -12,15 +13,36 @@ final class EventAlertController: ObservableObject {
     /// Occurrence keys already alerted, with when, so each event alerts once. Pruned daily.
     private var shown: [String: Date] = [:]
     private var window: NSWindow?
+    /// Keeps App Nap away while alerts are on. A menu bar app with no window open naps, and
+    /// then its timers fire minutes late or not at all, so alerts came late or never.
+    private var activity: NSObjectProtocol?
+    private var enabledObserver: AnyCancellable?
 
     init(settings: SettingsStore, eventKit: EventKitBridge) {
         self.settings = settings
         self.eventKit = eventKit
-        // Scheduled on the main run loop, so the block runs on the main actor.
-        timer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+        // On the main run loop, so the block runs on the main actor; in the common modes, so
+        // it keeps checking while the menu is open.
+        let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.check() }
         }
-        timer?.tolerance = 5
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+        enabledObserver = settings.$alerts.map(\.enabled).removeDuplicates().sink { [weak self] enabled in
+            MainActor.assumeIsolated { self?.preventAppNap(enabled) }
+        }
+    }
+
+    private func preventAppNap(_ prevent: Bool) {
+        if prevent, activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiatedAllowingIdleSystemSleep,
+                reason: "Showing a full-screen alert when an event starts")
+        } else if !prevent, let activity {
+            ProcessInfo.processInfo.endActivity(activity)
+            self.activity = nil
+        }
     }
 
     private func check() {
@@ -34,13 +56,13 @@ final class EventAlertController: ObservableObject {
         shown = shown.filter { now.timeIntervalSince($0.value) < 24 * 3600 }
         let due = EventAlertPlanner.dueAlerts(
             events: events, shown: Set(shown.keys), now: now, leadMinutes: settings.alerts.leadMinutes)
-        guard let event = due.first else { return }
+        // Marked only once it's on screen, so an alert that couldn't show is tried again.
+        guard let event = due.first, show(event) else { return }
         shown[event.key] = now
-        show(event)
     }
 
-    private func show(_ event: SourceEvent) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+    private func show(_ event: SourceEvent) -> Bool {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
         let panel = AlertPanel(contentRect: screen.frame, styleMask: [.borderless],
                                backing: .buffered, defer: false)
         panel.isOpaque = false
@@ -49,12 +71,14 @@ final class EventAlertController: ObservableObject {
         panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+        panel.ignoresKeysUntil = Date().addingTimeInterval(1.5)
         panel.contentView = NSHostingView(rootView: EventAlertView(event: event) { [weak self] in
             self?.dismiss()
         })
         window = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        return true
     }
 
     private func dismiss() {
@@ -68,7 +92,20 @@ final class EventAlertController: ObservableObject {
 /// Borderless windows can't become key by default, but the alert's buttons need the keyboard
 /// (Return joins, Escape ignores).
 private final class AlertPanel: NSPanel {
+    /// Return or Escape typed into another app just as the alert appears would otherwise
+    /// dismiss it before it was seen.
+    var ignoresKeysUntil = Date.distantPast
+
     override var canBecomeKey: Bool { true }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        Date() < ignoresKeysUntil || super.performKeyEquivalent(with: event)
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        if [.keyDown, .keyUp].contains(event.type), Date() < ignoresKeysUntil { return }
+        super.sendEvent(event)
+    }
 }
 
 private struct EventAlertView: View {
